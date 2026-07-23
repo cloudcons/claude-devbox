@@ -1,0 +1,10 @@
+[tools]
+go = "1.26.4"
+
+[tasks.build]
+description = "Compile the binary to ./claude-remote"
+run = "go build -trimpath -o claude-remote ."
+
+[tasks.install]
+description = "Build and install to ~/.local/bin/claude-remote"
+run = "go build -trimpath -o ~/.local/bin/claude-remote ."

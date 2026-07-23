@@ -1,0 +1,7 @@
+---
+# Copy to inventory.yml and edit. Any Debian/Ubuntu host with systemd works.
+devboxes:
+  hosts:
+    devbox1:
+      ansible_host: 203.0.113.10
+      ansible_user: root # or a sudo-capable cloud user, e.g. ubuntu + become

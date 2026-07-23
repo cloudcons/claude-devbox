@@ -1,0 +1,6 @@
+---
+- name: Provision Claude Code dev boxes
+  hosts: devboxes
+  become: true
+  roles:
+    - devbox

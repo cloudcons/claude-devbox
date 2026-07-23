@@ -1,0 +1,26 @@
+[Unit]
+Description=Claude Code Remote Control server (project '%i')
+Documentation=file:%h/.config/claude-remote/%i.env
+After=network-online.target
+Wants=network-online.target
+# Remote Control needs a one-time interactive `claude auth login` (it rejects
+# long-lived tokens). Stay dormant — not crash-looping — until that exists.
+ConditionPathExists=%h/.claude/.credentials.json
+
+[Service]
+Type=forking
+EnvironmentFile=%h/.config/claude-remote/%i.env
+# mise shims first so kubectl/flux/tofu/uv/node resolve inside sessions.
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Dedicated tmux socket per project (cc-<project>): each service owns its own
+# tmux server, so stop/restart of one never touches another's sessions.
+# Attach to see the pairing URL:  tmux -L cc-%i attach -t %i
+ExecStart=/usr/bin/tmux -L cc-%i new-session -d -s %i -c ${CLAUDE_WORKDIR} claude remote-control
+ExecStop=/usr/bin/tmux -L cc-%i kill-server
+# If the server ever dies (crash, >10min offline, upgrade), systemd brings it
+# straight back — this is what keeps it reachable for days.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

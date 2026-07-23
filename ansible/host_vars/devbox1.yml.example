@@ -1,0 +1,25 @@
+---
+# Copy to host_vars/<your-host>.yml and edit. Everything here has a sane
+# default in roles/devbox/defaults/main.yml — set only what you need.
+
+devbox_authorized_keys:
+  - "ssh-ed25519 AAAA... you@laptop"
+
+devbox_git_user_name: "Ada Lovelace"
+devbox_git_user_email: "ada@example.com"
+
+# Toolchain for the box, via mise (add whatever your projects need):
+devbox_mise_tools:
+  - go
+  - node
+  - python
+  - uv
+  - gh
+
+# Repos to pre-clone into ~/Work (optional — you can also clone by hand or
+# with `claude-remote add <name> --clone owner/repo` if gh is installed):
+devbox_repos:
+  - { repo: "git@github.com:acme/app.git", dest: app }
+
+# devbox_install_docker: true
+# devbox_claude_apt_channel: latest

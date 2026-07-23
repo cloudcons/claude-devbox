@@ -1,0 +1,3 @@
+ansible/inventory.yml
+ansible/host_vars/*
+!ansible/host_vars/*.example

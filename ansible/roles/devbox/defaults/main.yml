@@ -1,0 +1,39 @@
+---
+# The unprivileged user Claude Code runs as. Created by the role, password
+# locked, with its own ed25519 keypair for git/ssh.
+devbox_user: dev
+devbox_home: "/home/{{ devbox_user }}"
+
+# Where project repos live; `claude-remote add` roots sessions here.
+devbox_workspace: "{{ devbox_home }}/Work"
+
+# SSH public keys allowed to log in as {{ devbox_user }} (your laptop, etc.).
+devbox_authorized_keys: []
+
+# Passwordless sudo for the dev user. Convenient for a personal box (the
+# account password is locked, so without NOPASSWD it cannot sudo at all);
+# set false on shared or hardened boxes and manage privileges yourself.
+devbox_sudo_nopasswd: true
+
+# Claude Code apt channel: "stable" or "latest".
+devbox_claude_apt_channel: stable
+
+# Optional local container runtime (docker-ce + compose + buildx).
+devbox_install_docker: false
+
+# Git identity for commits made on the box.
+devbox_git_user_name: ""
+devbox_git_user_email: ""
+
+# Global toolchain, installed per-user via mise (https://mise.jdx.dev).
+# Example: [go, node, python, uv, gh]
+devbox_mise_tools: []
+
+# Repos to clone into the workspace (clone-only; never clobbers a checkout).
+# Example:
+#   devbox_repos:
+#     - { repo: "git@github.com:acme/app.git", dest: app }
+#     - { repo: "https://github.com/acme/docs.git", dest: docs, version: main }
+# SSH URLs authenticate with the box's generated key — add the public key
+# (printed at the end of the run) as a deploy key or to your GitHub account.
+devbox_repos: []

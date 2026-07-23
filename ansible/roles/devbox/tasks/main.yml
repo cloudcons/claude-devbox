@@ -1,0 +1,219 @@
+---
+# Claude Code dev box: unprivileged dev user + Claude Code (apt) + mise
+# toolchain + the claude-remote binary for per-project supervised Remote
+# Control servers. Works on any Debian/Ubuntu host with systemd — VM, cloud
+# instance, bare metal, or a container that runs systemd.
+
+- name: Install prerequisites
+  ansible.builtin.apt:
+    name:
+      - git
+      - curl
+      - ca-certificates
+      - gnupg
+      - tmux
+      - ripgrep
+      - jq
+      - acl # these two let root-connected Ansible become the unprivileged
+      - sudo # user (minimal images ship neither)
+      - openssh-client
+      - rsync
+      - unzip
+      - python3
+      - libatomic1 # Node >=24 links libatomic; minimal images omit it
+      - build-essential # C toolchain for native builds
+    state: present
+    update_cache: true
+
+- name: Ensure apt keyrings dir exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add Claude Code apt signing key
+  ansible.builtin.get_url:
+    url: https://downloads.claude.ai/keys/claude-code.asc
+    dest: /etc/apt/keyrings/claude-code.asc
+    mode: "0644"
+
+- name: Add Claude Code apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/claude-code.asc]
+      https://downloads.claude.ai/claude-code/apt/{{ devbox_claude_apt_channel }}
+      {{ devbox_claude_apt_channel }} main
+    filename: claude-code
+    state: present
+
+- name: Install claude-code (tracks the channel's newest release)
+  ansible.builtin.apt:
+    name: claude-code
+    state: latest # noqa package-latest — the point is to follow the channel
+    update_cache: true
+
+- name: Create the dev user (generates its dedicated SSH keypair)
+  ansible.builtin.user:
+    name: "{{ devbox_user }}"
+    shell: /bin/bash
+    home: "{{ devbox_home }}"
+    generate_ssh_key: true
+    ssh_key_type: ed25519
+    ssh_key_comment: "{{ devbox_user }}@{{ inventory_hostname }} (devbox key)"
+
+- name: Authorize operator keys for the dev user
+  ansible.posix.authorized_key:
+    user: "{{ devbox_user }}"
+    key: "{{ devbox_authorized_keys | join('\n') }}"
+  when: devbox_authorized_keys | length > 0
+
+- name: Grant the dev user passwordless sudo
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/{{ devbox_user }}
+    content: "{{ devbox_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    mode: "0440"
+    validate: visudo -cf %s
+  when: devbox_sudo_nopasswd
+
+- name: Install Docker engine (optional dev container runtime)
+  when: devbox_install_docker
+  block:
+    - name: Add Docker apt signing key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ ansible_distribution | lower }}
+          {{ ansible_distribution_release }} stable
+        filename: docker
+        state: present
+
+    - name: Install docker-ce + compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Add the dev user to the docker group
+      ansible.builtin.user:
+        name: "{{ devbox_user }}"
+        groups: docker
+        append: true
+
+    - name: Enable and start dockerd
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+- name: Configure git identity
+  community.general.git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: global
+  become: true
+  become_user: "{{ devbox_user }}"
+  loop:
+    - { name: user.name, value: "{{ devbox_git_user_name }}" }
+    - { name: user.email, value: "{{ devbox_git_user_email }}" }
+  when: devbox_git_user_name | length > 0
+
+- name: Ensure workspace dir exists
+  ansible.builtin.file:
+    path: "{{ devbox_workspace }}"
+    state: directory
+    owner: "{{ devbox_user }}"
+    group: "{{ devbox_user }}"
+    mode: "0755"
+
+- name: Clone workspace repos (clone-only; sessions on the box do their own pulls)
+  ansible.builtin.git:
+    repo: "{{ item.repo }}"
+    dest: "{{ devbox_workspace }}/{{ item.dest }}"
+    version: "{{ item.version | default('main') }}"
+    update: false # don't clobber a working checkout on every run
+    accept_newhostkey: true
+  become: true
+  become_user: "{{ devbox_user }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0" # fail fast on credential miss instead of hanging
+  loop: "{{ devbox_repos }}"
+
+- name: Install mise (per-user, ~/.local/bin/mise)
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://mise.run | sh
+  args:
+    creates: "{{ devbox_home }}/.local/bin/mise"
+    executable: /bin/bash
+  become: true
+  become_user: "{{ devbox_user }}"
+
+- name: Activate mise in interactive shells
+  ansible.builtin.blockinfile:
+    path: "{{ devbox_home }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED — devbox role"
+    block: |
+      eval "$({{ devbox_home }}/.local/bin/mise activate bash)"
+
+- name: Install global mise tools (per-box toolchain)
+  ansible.builtin.command:
+    cmd: "{{ devbox_home }}/.local/bin/mise use --global --yes {{ item }}"
+  become: true
+  become_user: "{{ devbox_user }}"
+  environment:
+    # npm-backend tools (npm:@scope/pkg): the mise-node npm wrapper re-invokes
+    # `mise` for reshim, which must be on PATH in this non-login context.
+    PATH: "{{ devbox_home }}/.local/bin:{{ ansible_env.PATH }}"
+  register: devbox_mise_use
+  changed_when: "'installed' in devbox_mise_use.stderr or 'installed' in devbox_mise_use.stdout"
+  loop: "{{ devbox_mise_tools }}"
+
+- name: Copy claude-remote source to the box
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../claude-remote/"
+    dest: "{{ devbox_home }}/.local/src/claude-remote/"
+    owner: "{{ devbox_user }}"
+    group: "{{ devbox_user }}"
+    mode: "0644"
+    directory_mode: "0755"
+
+- name: Build and install claude-remote
+  ansible.builtin.command:
+    cmd: "{{ devbox_home }}/.local/bin/mise exec go@1.26 -- go build -trimpath -o {{ devbox_home }}/.local/bin/claude-remote ."
+    chdir: "{{ devbox_home }}/.local/src/claude-remote"
+    creates: "{{ devbox_home }}/.local/bin/claude-remote"
+  become: true
+  become_user: "{{ devbox_user }}"
+  environment:
+    PATH: "{{ devbox_home }}/.local/bin:{{ ansible_env.PATH }}"
+
+- name: Enable linger (user services survive logout and start at boot)
+  ansible.builtin.command:
+    cmd: loginctl enable-linger {{ devbox_user }}
+    creates: /var/lib/systemd/linger/{{ devbox_user }}
+
+- name: Read the generated public key
+  ansible.builtin.slurp:
+    src: "{{ devbox_home }}/.ssh/id_ed25519.pub"
+  register: devbox_ssh_pubkey
+
+- name: Show the dedicated public key + the handoff steps
+  ansible.builtin.debug:
+    msg:
+      - "Dev-box SSH public key (add as deploy key / to your git host if cloning over SSH):"
+      - "{{ devbox_ssh_pubkey.content | b64decode | trim }}"
+      - "Handoff (interactive, once): ssh {{ devbox_user }}@{{ ansible_host | default(inventory_hostname) }}"
+      - "  1. claude auth login        (browser OAuth — claude.ai account)"
+      - "  2. claude-remote add <name> --workdir {{ devbox_workspace }}/<repo>   (one per project)"
+      - "Sessions then appear at claude.ai/code and in the mobile app."
