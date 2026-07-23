@@ -1,5 +1,8 @@
 # claude-devbox
 
+[![ci](https://github.com/cloudcons/claude-devbox/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudcons/claude-devbox/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Turn any Linux box into a **Claude Code dev box**: an unprivileged dev user
 with a per-project toolchain, and one supervised **Claude Code Remote
 Control** server per repo — so every project shows up as its own session at
@@ -153,3 +156,7 @@ ansible/
   host_vars/devbox1.yml.example
   roles/devbox/           the provisioning role
 ```
+
+## Contributing & license
+
+PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). [MIT](LICENSE).
